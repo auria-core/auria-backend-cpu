@@ -1,10 +1,10 @@
-use auria_core::{ExecutionOutput, ExecutionState, Result, Tensor};
+use auria_core::{ExecutionOutput, ExecutionState, AuriaResult, Tensor};
 use async_trait::async_trait;
 
 #[async_trait]
 pub trait CpuBackend: Send + Sync {
     fn name(&self) -> &str;
-    async fn execute(&self, input: Tensor, experts: Vec<Tensor>, state: ExecutionState) -> Result<ExecutionOutput>;
+    async fn execute(&self, input: Tensor, experts: Vec<Tensor>, state: ExecutionState) -> AuriaResult<ExecutionOutput>;
 }
 
 pub struct CpuExecutionEngine<B: CpuBackend> {
@@ -16,7 +16,7 @@ impl<B: CpuBackend> CpuExecutionEngine<B> {
         Self { backend }
     }
 
-    pub async fn execute(&self, input: Tensor, experts: Vec<Tensor>, state: ExecutionState) -> Result<ExecutionOutput> {
+    pub async fn execute(&self, input: Tensor, experts: Vec<Tensor>, state: ExecutionState) -> AuriaResult<ExecutionOutput> {
         self.backend.execute(input, experts, state).await
     }
 }

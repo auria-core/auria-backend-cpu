@@ -1,0 +1,15 @@
+[package]
+name = "auria-backend-cpu"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/auria-core/aauria-backend-cpu"
+authors = ["AURIA Team <auria@dust.llc>"]
+description = "AURIA Runtime Core - CPU execution backend"
+
+[dependencies]
+auria-core = { path = "../auria-core", version = "0.1.0"}
+auria-execution = { path = "../auria-execution", version = "0.1.0"}
+anyhow = "1.0"
+async-trait = "0.1"
+num-traits = "0.2"

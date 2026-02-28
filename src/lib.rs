@@ -1,3 +1,10 @@
+// File: lib.rs - This file is part of AURIA
+// Copyright (c) 2026 AURIA Developers and Contributors
+// Description:
+//     CPU execution backend for AURIA Runtime Core.
+//     Implements tensor operations and expert execution on CPU hardware
+//     for the Nano and Standard tiers.
+//
 use auria_core::{ExecutionOutput, ExecutionState, AuriaResult, Tensor};
 use async_trait::async_trait;
 

@@ -117,7 +117,10 @@ dependencies = [
  "anyhow",
  "auria-core",
  "auria-security",
+ "hex",
  "lru",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]

@@ -5,7 +5,8 @@
 //     Implements tensor operations and expert execution on CPU hardware
 //     for the Nano and Standard tiers.
 //
-use auria_core::{AuriaError, AuriaResult, ExecutionOutput, ExecutionState, Tensor, TensorDType, Tier};
+use auria_core::{AuriaError, AuriaResult, Tensor, TensorDType, Tier, UsageStats};
+use auria_execution::{ExecutionOutput, ExecutionState};
 use async_trait::async_trait;
 
 pub struct CpuBackendImpl {
@@ -136,8 +137,9 @@ impl auria_execution::ExecutionBackend for CpuBackendImpl {
         
         Ok(ExecutionOutput {
             tokens,
-            usage: auria_core::UsageStats {
-                tokens_generated: state.position,
+            usage: UsageStats {
+                tokens_generated: state.position as u64,
+                tokens_processed: state.position as u64,
             },
         })
     }

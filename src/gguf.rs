@@ -11,6 +11,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing;
 
 #[derive(Clone, Debug)]
 pub struct ModelConfig {
@@ -289,7 +290,8 @@ impl GGMLFile {
         }
 
         let mut name_buf = vec![0u8; name_len - 1];
-        file.read_exact(&mut name_buf)?;
+        file.read_exact(&mut name_buf)
+            .map_err(|e| AuriaError::ExecutionError(format!("Failed to read tensor name: {}", e)))?;
         let name = String::from_utf8_lossy(&name_buf).to_string();
 
         let offset = Self::read_u64(file)?;
@@ -359,9 +361,11 @@ impl GGMLFile {
 
     pub fn get_tensor_data(&mut self, tensor_name: &str) -> AuriaResult<Vec<u8>> {
         if let Some(tensor) = self.tensors.iter().find(|t| t.name == tensor_name) {
-            self.file.seek(SeekFrom::Start(tensor.offset))?;
+            self.file.seek(SeekFrom::Start(tensor.offset))
+                .map_err(|e| AuriaError::ExecutionError(format!("Failed to seek: {}", e)))?;
             let mut data = vec![0u8; tensor.size as usize];
-            self.file.read_exact(&mut data)?;
+            self.file.read_exact(&mut data)
+                .map_err(|e| AuriaError::ExecutionError(format!("Failed to read tensor: {}", e)))?;
             Ok(data)
         } else {
             Err(AuriaError::ExecutionError(format!(
@@ -378,7 +382,7 @@ impl GGMLFile {
             let tensor = GGMLTensor {
                 name: name.clone(),
                 dtype: GGMLType::F16,
-                shape: vec![config.hidden_size / 4, config.hidden_size],
+                shape: vec![(self.config.hidden_size / 4) as u64, self.config.hidden_size as u64],
                 offset: 0,
                 size: data.len() as u64,
             };
@@ -415,10 +419,15 @@ impl LoadedModel {
         let mut vocab = HashMap::new();
         let mut reverse_vocab = Vec::new();
         
-        for tensor in &gguf.tensors {
-            if tensor.name.contains("embed") || tensor.name.contains("lm_head") {
-                if let Ok(data) = gguf.get_tensor_data(&tensor.name) {
-                    weights.insert(tensor.name.clone(), Tensor {
+        let tensor_names: Vec<String> = gguf.tensors.iter()
+            .filter(|t| t.name.contains("embed") || t.name.contains("lm_head"))
+            .map(|t| t.name.clone())
+            .collect();
+        
+        for name in tensor_names {
+            if let Ok(data) = gguf.get_tensor_data(&name) {
+                if let Some(tensor) = gguf.tensors.iter().find(|t| t.name == name) {
+                    weights.insert(name, Tensor {
                         data,
                         shape: tensor.shape.iter().map(|&s| s as u32).collect(),
                         dtype: TensorDType::FP16,
@@ -453,14 +462,7 @@ impl LoadedModel {
         text.split_whitespace()
             .map(|word| {
                 self.vocab.get(word).copied()
-                    .unwrap_or_else(|| {
-                        let idx = self.reverse_vocab.len();
-                        if idx < self.config.vocab_size {
-                            self.reverse_vocab.push(word.to_string());
-                            self.vocab.insert(word.to_string(), idx);
-                        }
-                        idx.min(self.config.vocab_size - 1)
-                    })
+                    .unwrap_or(0) // Use unknown token ID for unknown words
             })
             .collect()
     }
@@ -516,20 +518,24 @@ impl LoadedModel {
         let top_sum: f32 = top_probs.iter().sum();
         let normalized: Vec<f32> = top_probs.iter().map(|p| p / top_sum).collect();
 
-        if let Some(&idx) = cutoff.choice() {
-            idx
-        } else {
-            use rand::Rng;
-            let r = rand::thread_rng().gen::<f32>();
-            let mut running_sum = 0.0;
-            for (i, &prob) in normalized.iter().enumerate() {
-                running_sum += prob;
-                if r <= running_sum {
-                    return sorted[i].0;
-                }
+        if !cutoff.is_empty() {
+            use rand::seq::SliceRandom;
+            use rand::thread_rng;
+            if let Some(&idx) = cutoff.choose(&mut thread_rng()) {
+                return idx;
             }
-            sorted[0].0
         }
+        
+        use rand::Rng;
+        let r = rand::thread_rng().gen::<f32>();
+        let mut running_sum = 0.0;
+        for (i, &prob) in normalized.iter().enumerate() {
+            running_sum += prob;
+            if r <= running_sum {
+                return sorted[i].0;
+            }
+        }
+        sorted[0].0
     }
 }
 
@@ -576,7 +582,8 @@ impl ModelRunner {
             .ok_or_else(|| AuriaError::ExecutionError("No model loaded".to_string()))?;
 
         let tokens = model.tokenize(prompt);
-        let mut generated: Vec<usize> = tokens;
+        let mut generated: Vec<usize> = tokens.clone();
+        let input_len = tokens.len();
 
         for _ in 0..max_tokens.min(self.max_length) {
             let logits = self.compute_logits(&model, &generated);
@@ -589,14 +596,14 @@ impl ModelRunner {
             generated.push(next_token);
         }
 
-        let output = model.decode_tokens(&generated[tokens.len()..]);
+        let output = model.decode_tokens(&generated[input_len..]);
         let words: Vec<String> = output
             .split_whitespace()
             .map(String::from)
             .collect();
 
         Ok(if words.is_empty() {
-            vec![format!("Generated {} tokens", generated.len() - tokens.len())]
+            vec![format!("Generated {} tokens", generated.len() - input_len)]
         } else {
             words
         })

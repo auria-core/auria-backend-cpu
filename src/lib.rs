@@ -236,7 +236,7 @@ mod tests {
         let backend = CpuBackendImpl::new();
         let a = vec![1.0f32, 2.0, 3.0, 4.0];
         let b = vec![5.0f32, 6.0, 7.0, 8.0];
-        let result = backend.matmul_f16(&a, &b, 2, 2, 2);
+        let result = CpuBackendImpl::matmul_f16(&a, &b, 2, 2, 2);
         assert_eq!(result.len(), 4);
     }
 }

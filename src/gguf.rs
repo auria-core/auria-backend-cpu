@@ -497,13 +497,18 @@ impl LoadedModel {
         let mut vocab = HashMap::new();
         let mut reverse_vocab = Vec::with_capacity(vocab_size);
         
+<<<<<<< HEAD
         // Expanded vocabulary with common English words, punctuation, and special tokens
         let common_tokens = vec![
             // Most common words (top 100 from word frequency lists)
+=======
+        let common_tokens = vec![
+>>>>>>> 04701d16e7030fb668e4e889843c36abd4bf5d8d
             "the", "be", "to", "of", "and", "a", "in", "that", "have", "I",
             "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
             "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
             "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
+<<<<<<< HEAD
             "so", "up", "out", "if", "about", "who", "get", "which", "go", "me",
             "when", "make", "can", "like", "time", "no", "just", "him", "know", "take",
             "people", "into", "year", "your", "good", "some", "could", "them", "see", "other",
@@ -573,6 +578,23 @@ impl LoadedModel {
         }
         
         tracing::debug!("Created simulated vocabulary with {} tokens", vocab.len());
+=======
+        ];
+        
+        for (i, token) in common_tokens.iter().enumerate() {
+            vocab.insert(token.to_string(), i);
+        }
+        
+        for i in common_tokens.len()..vocab_size {
+            let token = format!("tok_{}", i);
+            vocab.insert(token.clone(), i);
+            reverse_vocab.push(token);
+        }
+        
+        for token in common_tokens {
+            reverse_vocab.push(token.to_string());
+        }
+>>>>>>> 04701d16e7030fb668e4e889843c36abd4bf5d8d
         
         Self {
             config,
@@ -996,6 +1018,7 @@ mod tests {
         let logits = vec![1.0, 2.0, 3.0, 0.5, 0.1];
         let token = model.sample_token(&logits, 0.0, 0.9);
         assert!(token < logits.len());
+<<<<<<< HEAD
     }
 
     #[test]
@@ -1046,5 +1069,7 @@ mod tests {
         // Test with temperature = 0 (greedy)
         let greedy_token = model.sample_token(&logits, 0.0, 0.9);
         assert!(greedy_token < logits.len());
+=======
+>>>>>>> 04701d16e7030fb668e4e889843c36abd4bf5d8d
     }
 }

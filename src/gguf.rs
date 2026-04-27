@@ -138,7 +138,6 @@ pub struct GGMLFile {
     file: File,
     tensors: Vec<GGMLTensor>,
     config: ModelConfig,
-    metadata: HashMap<String, GGMLMetadataValue>,
 }
 
 #[derive(Clone, Debug)]
@@ -174,7 +173,7 @@ impl GGMLFile {
         let metadata_kv_count = Self::read_u64(&mut file)?;
         tracing::info!("Tensor count: {}, Metadata count: {}", tensor_count, metadata_kv_count);
 
-        let mut metadata = HashMap::new();
+        let metadata = HashMap::new();
         
         for _ in 0..metadata_kv_count {
             if let Err(e) = Self::skip_metadata_kv(&mut file) {
@@ -191,7 +190,6 @@ impl GGMLFile {
             file,
             tensors: Vec::new(),
             config,
-            metadata,
         })
     }
     
@@ -243,111 +241,6 @@ impl GGMLFile {
         file.read_exact(&mut buf)
             .map_err(|e| AuriaError::ExecutionError(format!("Failed to read u64: {}", e)))?;
         Ok(u64::from_le_bytes(buf))
-    }
-
-    fn read_metadata_kv(file: &mut File) -> AuriaResult<Option<(String, GGMLMetadataValue)>> {
-        let key_len = Self::read_u64(file)?;
-        let mut key_buf = vec![0u8; key_len as usize - 1];
-        file.read_exact(&mut key_buf)
-            .map_err(|e| AuriaError::ExecutionError(format!("Failed to read key: {}", e)))?;
-        let key = String::from_utf8_lossy(&key_buf).to_string();
-
-        let value_type = Self::read_u32(file)?;
-
-        let value = match value_type {
-            0 => {
-                Self::read_u64(file)?;
-                Some(GGMLMetadataValue::I8(file.by_ref().read_u8().unwrap_or(0) as i8))
-            }
-            1 => {
-                let mut buf = [0u8; 2];
-                let _ = file.read_exact(&mut buf);
-                Some(GGMLMetadataValue::I16(i16::from_le_bytes(buf)))
-            }
-            2 => {
-                let mut buf = [0u8; 4];
-                let _ = file.read_exact(&mut buf);
-                Some(GGMLMetadataValue::I32(i32::from_le_bytes(buf)))
-            }
-            3 => {
-                let mut buf = [0u8; 8];
-                let _ = file.read_exact(&mut buf);
-                Some(GGMLMetadataValue::I64(i64::from_le_bytes(buf)))
-            }
-            4 => {
-                let mut buf = [0u8; 4];
-                let _ = file.read_exact(&mut buf);
-                Some(GGMLMetadataValue::F32(f32::from_le_bytes(buf)))
-            }
-            5 => {
-                let mut buf = [0u8; 8];
-                let _ = file.read_exact(&mut buf);
-                Some(GGMLMetadataValue::F64(f64::from_le_bytes(buf)))
-            }
-            6 => Some(GGMLMetadataValue::Bool(Self::read_u32(file)? != 0)),
-            7 => {
-                let len = Self::read_u64(file)?;
-                if len > 10000 {
-                    tracing::warn!("Skipping large string metadata ({} bytes)", len);
-                    None
-                } else {
-                    let buf_len = (len as usize).saturating_sub(1).min(10000);
-                    let mut buf = vec![0u8; buf_len];
-                    let _ = file.read_exact(&mut buf);
-                    Some(GGMLMetadataValue::String(String::from_utf8_lossy(&buf).to_string()))
-                }
-            }
-            8 => {
-                let len = Self::read_u64(file)?;
-                if len > 1000 {
-                    tracing::warn!("Skipping large array metadata ({} elements)", len);
-                    None
-                } else {
-                    let mut arr = Vec::new();
-                    let _arr_type = Self::read_u32(file)?;
-                    for _ in 0..len.min(1000) {
-                        if let Some((_, val)) = Self::read_metadata_kv(file)? {
-                            arr.push(val);
-                        }
-                    }
-                    Some(GGMLMetadataValue::Array(arr))
-                }
-            }
-            _ => None,
-        };
-
-        Ok(value.map(|v| (key, v)))
-    }
-
-    fn read_tensor_info(file: &mut File) -> AuriaResult<GGMLTensor> {
-        let n_dims = Self::read_u32(file)? as usize;
-        let name_len = Self::read_u32(file)? as usize;
-        let dtype_val = Self::read_u32(file)?;
-
-        let mut shape = Vec::new();
-        for _ in 0..n_dims.min(4) {
-            shape.push(Self::read_u64(file)? as u64);
-        }
-
-        let mut name_buf = vec![0u8; name_len - 1];
-        file.read_exact(&mut name_buf)
-            .map_err(|e| AuriaError::ExecutionError(format!("Failed to read tensor name: {}", e)))?;
-        let name = String::from_utf8_lossy(&name_buf).to_string();
-
-        let offset = Self::read_u64(file)?;
-
-        let dtype = GGMLType::from_u32(dtype_val)
-            .ok_or_else(|| AuriaError::ExecutionError(format!("Unknown GGML type: {}", dtype_val)))?;
-
-        let size: u64 = shape.iter().product::<u64>() * dtype.type_size() / 10 * 10;
-
-        Ok(GGMLTensor {
-            name,
-            dtype,
-            shape,
-            offset,
-            size,
-        })
     }
 
     fn extract_config(metadata: &HashMap<String, GGMLMetadataValue>) -> ModelConfig {
@@ -440,14 +333,13 @@ impl GGMLFile {
 
 pub struct LoadedModel {
     config: ModelConfig,
-    weights: HashMap<String, Tensor>,
     vocab: HashMap<String, usize>,
     reverse_vocab: Vec<String>,
 }
 
 impl LoadedModel {
     pub fn from_gguf<P: AsRef<Path>>(path: P) -> AuriaResult<Self> {
-        let mut gguf = GGMLFile::open(path)?;
+        let gguf = GGMLFile::open(path)?;
         let config = gguf.config().clone();
         
         tracing::info!("Loading model: {:?}", config.model_type);
@@ -455,26 +347,8 @@ impl LoadedModel {
         tracing::info!("Hidden size: {}", config.hidden_size);
         tracing::info!("Layers: {}", config.num_layers);
         
-        let mut weights = HashMap::new();
         let mut vocab = HashMap::new();
         let mut reverse_vocab = Vec::new();
-        
-        let tensor_names: Vec<String> = gguf.tensors.iter()
-            .filter(|t| t.name.contains("embed") || t.name.contains("lm_head"))
-            .map(|t| t.name.clone())
-            .collect();
-        
-        for name in tensor_names {
-            if let Ok(data) = gguf.get_tensor_data(&name) {
-                if let Some(tensor) = gguf.tensors.iter().find(|t| t.name == name) {
-                    weights.insert(name, Tensor {
-                        data,
-                        shape: tensor.shape.iter().map(|&s| s as u32).collect(),
-                        dtype: TensorDType::FP16,
-                    });
-                }
-            }
-        }
         
         for i in 0..config.vocab_size {
             let token = format!("token_{}", i);
@@ -484,7 +358,6 @@ impl LoadedModel {
         
         Ok(Self {
             config,
-            weights,
             vocab,
             reverse_vocab,
         })
@@ -497,18 +370,13 @@ impl LoadedModel {
         let mut vocab = HashMap::new();
         let mut reverse_vocab = Vec::with_capacity(vocab_size);
         
-<<<<<<< HEAD
-        // Expanded vocabulary with common English words, punctuation, and special tokens
         let common_tokens = vec![
+            // Expanded vocabulary with common English words, punctuation, and special tokens
             // Most common words (top 100 from word frequency lists)
-=======
-        let common_tokens = vec![
->>>>>>> 04701d16e7030fb668e4e889843c36abd4bf5d8d
             "the", "be", "to", "of", "and", "a", "in", "that", "have", "I",
             "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
             "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
             "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
-<<<<<<< HEAD
             "so", "up", "out", "if", "about", "who", "get", "which", "go", "me",
             "when", "make", "can", "like", "time", "no", "just", "him", "know", "take",
             "people", "into", "year", "your", "good", "some", "could", "them", "see", "other",
@@ -557,8 +425,7 @@ impl LoadedModel {
             "however", "moreover", "therefore", "additionally", "consequently", "furthermore", "hence", "thus",
             "although", "because", "while", "whether", "either", "neither", "perhap", "actually",
         ];
-        
-        // Insert unique tokens
+
         let mut unique_idx = 0;
         for token in common_tokens.iter() {
             let key = token.to_string();
@@ -576,29 +443,11 @@ impl LoadedModel {
             reverse_vocab.push(token);
             unique_idx += 1;
         }
-        
+
         tracing::debug!("Created simulated vocabulary with {} tokens", vocab.len());
-=======
-        ];
-        
-        for (i, token) in common_tokens.iter().enumerate() {
-            vocab.insert(token.to_string(), i);
-        }
-        
-        for i in common_tokens.len()..vocab_size {
-            let token = format!("tok_{}", i);
-            vocab.insert(token.clone(), i);
-            reverse_vocab.push(token);
-        }
-        
-        for token in common_tokens {
-            reverse_vocab.push(token.to_string());
-        }
->>>>>>> 04701d16e7030fb668e4e889843c36abd4bf5d8d
         
         Self {
             config,
-            weights: HashMap::new(),
             vocab,
             reverse_vocab,
         }
@@ -617,7 +466,6 @@ impl LoadedModel {
         
         Self {
             config,
-            weights: HashMap::new(),
             vocab,
             reverse_vocab,
         }
@@ -707,8 +555,6 @@ impl LoadedModel {
     }
 
     pub fn sample_token(&self, logits: &[f32], temperature: f32, top_p: f32) -> usize {
-        let vocab_size = self.vocab_size();
-        
         if temperature == 0.0 {
             // Greedy: return the token with highest logit
             return logits
@@ -891,7 +737,6 @@ impl ModelRunner {
 
     fn compute_logits(&self, model: &LoadedModel, tokens: &[usize], prompt: &str) -> Vec<f32> {
         let vocab_size = model.vocab_size();
-        let hidden_size = model.config().hidden_size;
         
         let mut logits = vec![0.0f32; vocab_size];
         
@@ -939,18 +784,6 @@ impl ModelRunner {
 impl Default for ModelRunner {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-trait ReadExact {
-    fn read_u8(&mut self) -> std::io::Result<u8>;
-}
-
-impl<R: Read> ReadExact for R {
-    fn read_u8(&mut self) -> std::io::Result<u8> {
-        let mut buf = [0u8; 1];
-        self.read_exact(&mut buf)?;
-        Ok(buf[0])
     }
 }
 
@@ -1018,7 +851,6 @@ mod tests {
         let logits = vec![1.0, 2.0, 3.0, 0.5, 0.1];
         let token = model.sample_token(&logits, 0.0, 0.9);
         assert!(token < logits.len());
-<<<<<<< HEAD
     }
 
     #[test]
@@ -1069,7 +901,5 @@ mod tests {
         // Test with temperature = 0 (greedy)
         let greedy_token = model.sample_token(&logits, 0.0, 0.9);
         assert!(greedy_token < logits.len());
-=======
->>>>>>> 04701d16e7030fb668e4e889843c36abd4bf5d8d
     }
 }

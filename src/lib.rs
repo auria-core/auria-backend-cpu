@@ -143,16 +143,6 @@ impl CpuBackendImpl {
         }
     }
 
-    fn layer_norm(&self, data: &mut [f32], epsilon: f32) {
-        let mean = data.iter().sum::<f32>() / data.len() as f32;
-        let variance = data.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / data.len() as f32;
-        let std = (variance + epsilon).sqrt();
-        
-        for val in data.iter_mut() {
-            *val = (*val - mean) / std;
-        }
-    }
-
     fn decode_tokens(&self, tensor: &Tensor) -> AuriaResult<Vec<String>> {
         let f32_data = self.convert_to_f32(&tensor.data)?;
         let top_indices: Vec<usize> = f32_data.iter()
